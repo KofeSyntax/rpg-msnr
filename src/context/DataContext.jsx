@@ -8,7 +8,7 @@ import { BANCO } from "../data/banco";
 import { CORPORACAO } from "../data/corporacao";
 import { SITE } from "../data/site";
 import { temSupabase } from "../lib/supabase";
-import { carregarTudo, gravar, descarregar, assinar, aplicarLinha, definirAoErro } from "../lib/sync";
+import { carregarTudo, gravar, descarregar, assinar, aplicarLinha, definirAoErro, temPendentes } from "../lib/sync";
 
 // Banco de dados do site. Com as variáveis do Supabase configuradas, tudo é salvo lá
 // (e atualiza em tempo real para todos). Sem elas, cai no localStorage (modo local).
@@ -80,8 +80,16 @@ export const DataProvider = ({ children }) => {
       })
       .catch((e) => ativo && setErro(e.message || "Não foi possível conectar ao Supabase."));
     const sair = () => descarregar();
+    const avisar = (e) => { if (temPendentes()) { e.preventDefault(); e.returnValue = ""; } };
+    const oculta = () => { if (document.visibilityState === "hidden") descarregar(); };
     window.addEventListener("pagehide", sair);
-    return () => { ativo = false; parar(); window.removeEventListener("pagehide", sair); };
+    window.addEventListener("beforeunload", avisar);
+    document.addEventListener("visibilitychange", oculta);
+    return () => {
+      ativo = false; parar();
+      window.removeEventListener("pagehide", sair); window.removeEventListener("beforeunload", avisar);
+      document.removeEventListener("visibilitychange", oculta);
+    };
   }, [tentativa]);
 
   // Modo local: outra aba alterou os dados
@@ -125,6 +133,11 @@ export const DataProvider = ({ children }) => {
 
   return (
     <DataContext.Provider value={{ db, atualizar, reiniciar, importarDoNavegador, erroSalvar, remoto: temSupabase }}>
+      {erroSalvar && (
+        <p role="alert" style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 300, margin: 0, padding: "10px 16px", background: "#8a0a0a", color: "#fff", textAlign: "center" }}>
+          ATENÇÃO: as alterações NÃO estão sendo salvas no Supabase ({erroSalvar}). Não feche esta página.
+        </p>
+      )}
       {children}
     </DataContext.Provider>
   );
