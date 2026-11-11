@@ -33,6 +33,7 @@ const montar = (col, linhas, padrao) => {
 const pendentes = new Map();
 let timer = null;
 let aoErro = () => {};
+export const temPendentes = () => pendentes.size > 0;
 export const definirAoErro = (fn) => { aoErro = fn; };
 
 export const gravar = (antes, depois) => {
@@ -86,10 +87,11 @@ export const carregarTudo = async (padroes) => {
     if (data.length < 1000) break;
   }
   const meta = new Set(linhas.filter((l) => l.colecao === "_meta").map((l) => l.id));
+  const comLinhas = new Set(linhas.map((l) => l.colecao)); // coleção com dados nunca é recriada com os padrões
   const db = {};
   const semear = {};
   for (const col of Object.keys(COLECOES)) {
-    if (!meta.has(col)) {
+    if (!meta.has(col) && !comLinhas.has(col)) {
       db[col] = padroes[col];
       semear[col] = padroes[col];
       itens(col, padroes[col]).forEach((_, id) => ordens.set(`${col}:${id}`, ordens.size));
@@ -101,9 +103,20 @@ export const carregarTudo = async (padroes) => {
   }
   const novas = Object.keys(semear);
   if (novas.length) {
-    gravar({}, semear);
-    await descarregar();
-    const { error } = await supabase.from("colecoes").upsert(novas.map((c) => ({ colecao: "_meta", id: c, dados: {}, cliente: CLIENTE })));
+    const rows = [];
+    for (const col of novas) {
+      itens(col, semear[col]).forEach((dados, id) =>
+        rows.push({ colecao: col, id, dados, ordem: ordens.get(`${col}:${id}`) ?? 0, cliente: CLIENTE }));
+    }
+    for (let i = 0; i < rows.length; i += 200) {
+      // ignoreDuplicates: se a linha já existe, NÃO é sobrescrita
+      const { error } = await supabase.from("colecoes").upsert(rows.slice(i, i + 200), { onConflict: "colecao,id", ignoreDuplicates: true });
+      if (error) throw error;
+    }
+  }
+  const marcar = Object.keys(COLECOES).filter((c) => !meta.has(c));
+  if (marcar.length) {
+    const { error } = await supabase.from("colecoes").upsert(marcar.map((c) => ({ colecao: "_meta", id: c, dados: {}, cliente: CLIENTE })), { onConflict: "colecao,id", ignoreDuplicates: true });
     if (error) throw error;
   }
   return db;
